@@ -1,0 +1,267 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+    },
+    "variables": {
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Network/virtualNetworks",
+            "apiVersion": "2019-11-01",
+            "name": "vnet-apim-eth-arm",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "10.0.0.0/23"
+                    ]
+                },
+                "virtualNetworkPeerings": [
+                ],
+                "enableDdosProtection": false,
+                "enableVmProtection": false
+            }
+        },
+        {
+            "type": "Microsoft.Network/virtualNetworks/subnets",
+            "apiVersion": "2019-11-01",
+            "name": "vnet-apim-eth-arm/snet-apim",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', 'vnet-apim-eth-arm')]"
+            ],
+            "properties": {
+                "addressPrefix": "10.0.1.0/29",
+                "delegations": [
+                ],
+                "privateEndpointNetworkPolicies": "Enabled",
+                "privateLinkServiceNetworkPolicies": "Enabled"
+            }
+        },
+        {
+            "type": "Microsoft.Network/virtualNetworks/subnets",
+            "apiVersion": "2019-11-01",
+            "name": "vnet-apim-eth-arm/snet-eth",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks', 'vnet-apim-eth-arm')]",
+                "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vnet-apim-eth-arm', 'snet-apim')]"
+            ],
+            "properties": {
+                "addressPrefix": "10.0.0.0/29",
+                "delegations": [
+                    {
+                        "name": "Microsoft.ContainerInstance/containerGroups",
+                        "properties": {
+                            "serviceName": "Microsoft.ContainerInstance/containerGroups"
+                        }
+                    }
+                ],
+                "privateEndpointNetworkPolicies": "Enabled",
+                "privateLinkServiceNetworkPolicies": "Enabled"
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkProfiles",
+            "apiVersion": "2019-11-01",
+            "name": "aci-network-profile-vnet-apim-eth-arm-snet-eth",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vnet-apim-eth-arm', 'snet-eth')]"
+            ],
+            "properties": {
+                "containerNetworkInterfaceConfigurations": [
+                    {
+                        "name": "eth0",
+                        "properties": {
+                            "ipConfigurations": [
+                                {
+                                    "name": "ipconfigprofile",
+                                    "properties": {
+                                        "subnet": {
+                                            "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vnet-apim-eth-arm', 'snet-eth')]"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.ContainerInstance/containerGroups",
+            "apiVersion": "2018-10-01",
+            "name": "aci-eth-arm",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/networkProfiles', 'aci-network-profile-vnet-apim-eth-arm-snet-eth')]"
+            ],
+            "properties": {
+                "containers": [
+                    {
+                        "name": "aci-eth-arm",
+                        "properties": {
+                            "image": "parity/parity",
+                            "resources": {
+                                "requests": {
+                                    "cpu": 1,
+                                    "memoryInGb": 1.5
+                                }
+                            },
+                            "command": [
+                                "parity",
+                                "--jsonrpc-interface=0.0.0.0",
+                                "--jsonrpc-cors",
+                                "all"
+                            ],
+                            "ports": [
+                                {
+                                    "protocol": "TCP",
+                                    "port": 8545
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "restartPolicy": "Always",
+                "ipAddress": {
+                    "ports": [
+                        {
+                            "protocol": "TCP",
+                            "port": 8545
+                        }
+                    ],
+                    "ip": "10.0.0.4",
+                    "type": "Private"
+                },
+                "osType": "Linux",
+                "networkProfile": {
+                    "id": "[resourceId('Microsoft.Network/networkProfiles', 'aci-network-profile-vnet-apim-eth-arm-snet-eth')]"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.ApiManagement/service",
+            "apiVersion": "2019-01-01",
+            "name": "apim-eth-arm",
+            "location": "East US 2",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vnet-apim-eth-arm', 'snet-apim')]"
+            ],
+            "sku": {
+                "name": "Developer",
+                "capacity": 1
+            },
+            "properties": {
+                "publisherEmail": "administrator@example.com",
+                "publisherName": "Example",
+                "virtualNetworkConfiguration": {
+                    "subnetResourceId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vnet-apim-eth-arm', 'snet-apim')]"
+                },
+                "virtualNetworkType": "External"
+            }
+        },
+        {
+            "type": "Microsoft.ApiManagement/service/apis",
+            "apiVersion": "2019-01-01",
+            "name": "apim-eth-arm/ethereum",
+            "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', 'apim-eth-arm')]"
+            ],
+            "properties": {
+                "displayName": "Ethereum",
+                "apiRevision": "1",
+                "subscriptionRequired": true,
+                "serviceUrl": "http://10.0.0.4:8545",
+                "protocols": [
+                    "https"
+                ],
+                "isCurrent": true,
+                "path": ""
+            }
+        },
+        {
+            "type": "Microsoft.ApiManagement/service/apis/operations",
+            "apiVersion": "2019-01-01",
+            "name": "apim-eth-arm/ethereum/post",
+            "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/apis', 'apim-eth-arm', 'ethereum')]",
+                "[resourceId('Microsoft.ApiManagement/service', 'apim-eth-arm')]"
+            ],
+            "properties": {
+                "displayName": "POST",
+                "method": "POST",
+                "urlTemplate": "/",
+                "templateParameters": [
+                ],
+                "request": {
+                    "queryParameters": [
+                    ],
+                    "headers": [
+                        {
+                            "name": "Content-Type",
+                            "type": "string",
+                            "required": true,
+                            "values": [
+                                "application/json"
+                            ]
+                        }
+                    ],
+                    "representations": [
+                    ]
+                },
+                "responses": [
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.ApiManagement/service/apis/policies",
+            "apiVersion": "2019-01-01",
+            "name": "apim-eth-arm/ethereum/policy",
+            "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/apis', 'apim-eth-arm', 'ethereum')]",
+                "[resourceId('Microsoft.ApiManagement/service', 'apim-eth-arm')]"
+            ],
+            "properties": {
+                "value": "<policies>\r\n  <inbound>\r\n    <base />\r\n    <rate-limit-by-key calls=\"1\" renewal-period=\"60\" counter-key=\"@(context.Subscription?.Key ?? &quot;anonymous&quot;)\" />\r\n    <cors>\r\n      <allowed-origins>\r\n        <origin>*</origin>\r\n      </allowed-origins>\r\n      <allowed-methods>\r\n        <method>POST</method>\r\n      </allowed-methods>\r\n      <allowed-headers>\r\n        <header>*</header>\r\n      </allowed-headers>\r\n      <expose-headers>\r\n        <header>*</header>\r\n      </expose-headers>\r\n    </cors>\r\n  </inbound>\r\n  <backend>\r\n    <base />\r\n  </backend>\r\n  <outbound>\r\n    <base />\r\n  </outbound>\r\n  <on-error>\r\n    <base />\r\n  </on-error>\r\n</policies>",
+                "format": "xml"
+            }
+        },
+        {
+            "type": "Microsoft.ApiManagement/service/products",
+            "apiVersion": "2019-01-01",
+            "name": "apim-eth-arm/ethereum",
+            "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', 'apim-eth-arm')]"
+            ],
+            "properties": {
+                "displayName": "Ethereum",
+                "description": "Ethereum product",
+                "subscriptionRequired": true,
+                "approvalRequired": false,
+                "subscriptionsLimit": 1,
+                "state": "published"
+            }
+        },
+        {
+            "name": "apim-eth-arm/ethereum/ethereum",
+            "type": "Microsoft.ApiManagement/service/products/apis",
+            "apiVersion": "2019-01-01",
+            "properties": {},
+            "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/apis', 'apim-eth-arm', 'ethereum')]",
+                "[resourceId('Microsoft.ApiManagement/service/products', 'apim-eth-arm', 'ethereum')]",
+                "[resourceId('Microsoft.ApiManagement/service', 'apim-eth-arm')]"
+            ]
+        },
+        {
+            "name": "apim-eth-arm/ethereum/developers",
+            "type": "Microsoft.ApiManagement/service/products/groups",
+            "apiVersion": "2019-01-01",
+            "properties": {},
+            "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/products/apis', 'apim-eth-arm', 'ethereum', 'ethereum')]"
+            ]
+        }
+    ]
+}
